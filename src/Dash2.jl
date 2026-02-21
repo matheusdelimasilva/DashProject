@@ -22,6 +22,9 @@ include("values/patch.jl")
 include("components/component.jl")
 include("components/registry.jl")
 
+# ─── Background Manager (abstract type needed before dependencies.jl) ────────
+include("callbacks/background.jl")
+
 # ─── Callback Dependencies (types needed before app.jl) ─────────────────────
 include("callbacks/dependencies.jl")
 
@@ -33,7 +36,6 @@ include("callbacks/context.jl")
 include("callbacks/grouping.jl")
 include("callbacks/registration.jl")
 include("callbacks/dispatch.jl")
-include("callbacks/background.jl")
 
 # ─── Frontend (index page, resources, fingerprinting) ────────────────────────
 include("frontend/fingerprint.jl")
@@ -45,9 +47,6 @@ include("server/router.jl")
 include("server/handlers.jl")
 include("server/endpoints.jl")
 include("server/server.jl")
-
-# ─── Pages System ───────────────────────────────────────────────────────────
-include("pages/pages.jl")
 
 # ─── Component Generation (loads metadata + generates wrapper functions) ─────
 include("components/generation.jl")
@@ -64,6 +63,9 @@ end
 
 # Generate component wrapper functions at precompilation time
 @place_embedded_components
+
+# ─── Pages System (must come after component generation) ─────────────────────
+include("pages/pages.jl")
 
 # ─── Exports ─────────────────────────────────────────────────────────────────
 
@@ -86,7 +88,7 @@ export ALL, MATCH, ALLSMALLER
 export ClientsideFunction
 
 # Pages (Phase 3)
-export register_page
+export register_page, PAGE_REGISTRY
 
 # Background (Phase 3)
 export AbstractBackgroundManager, ThreadPoolManager

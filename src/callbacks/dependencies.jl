@@ -172,11 +172,39 @@ JSON3.StructTypes.StructType(::Type{ClientsideFunction}) = JSON3.StructTypes.Str
     Callback
 
 Stores a registered callback function and its dependencies.
+Includes Phase 3 background callback fields.
 """
 struct Callback
     func::Union{Function,ClientsideFunction}
     dependencies::CallbackDeps
     prevent_initial_call::Bool
+    # Phase 3: Background callback fields
+    background::Bool
+    background_key::Union{String,Nothing}
+    interval::Int
+    progress::Union{Vector{<:Output},Nothing}
+    progress_default::Union{Vector,Nothing}
+    running::Union{Dict{String,Any},Nothing}
+    running_off::Union{Dict{String,Any},Nothing}
+    cancel::Union{Vector{Dict{String,Any}},Nothing}
+    manager::Union{AbstractBackgroundManager,Nothing}
+
+    # Full constructor
+    function Callback(func, deps, prevent_initial_call;
+                      background=false,
+                      background_key=nothing,
+                      interval=1000,
+                      progress=nothing,
+                      progress_default=nothing,
+                      running=nothing,
+                      running_off=nothing,
+                      cancel=nothing,
+                      manager=nothing)
+        new(func, deps, prevent_initial_call,
+            background, background_key, interval,
+            progress, progress_default,
+            running, running_off, cancel, manager)
+    end
 end
 
 is_multi_out(cb::Callback) = cb.dependencies.multi_out

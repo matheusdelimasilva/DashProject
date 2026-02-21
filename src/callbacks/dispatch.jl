@@ -77,6 +77,17 @@ function process_callback(request::HTTP.Request, state)
         !haskey(app.callback_map, cb_key) && return HTTP.Response(404, "Callback not found: $cb_key")
 
         cb = app.callback_map[cb_key]
+
+        # Phase 3: Background callback dispatch
+        if cb.background
+            query = HTTP.queryparams(HTTP.URI(request.target))
+            if !haskey(query, "cacheKey")
+                return _setup_background_callback(app, cb, cb_key, inputs, cb_state, output, params)
+            else
+                return _poll_background_callback(app, cb, query, output, params)
+            end
+        end
+
         is_multi = is_multi_out(cb)
         outputs_list = outputs_to_vector(
             get(params, :outputs, split_callback_id(params[:output])),
@@ -102,6 +113,104 @@ function process_callback(request::HTTP.Request, state)
         end
     end
 
+    return response
+end
+
+# ─── Background Callback: First Request ────────────────────────────────────
+
+function _setup_background_callback(app, cb, cb_key, inputs, cb_state, output, params)
+    args = make_args(inputs, cb_state)
+    changedProps = get(params, :changedPropIds, [])
+
+    # Build cache key from args + callback_id
+    cache_key = make_cache_key(cb_key, args, changedProps)
+
+    # Get manager
+    mgr = something(cb.manager, app.config.background_callback_manager)
+    if isnothing(mgr)
+        error("Background callback requires a manager. Set `background_callback_manager` in `dash()` or pass `manager` to `callback!`.")
+    end
+
+    # Spawn the background job
+    # The wrapped func expects (cache_key, args...) for progress injection
+    call_job_fn(mgr, cache_key, cb.func, (cache_key, args...), Dict{String,Any}())
+
+    # Build initial response
+    result = Dict{String,Any}(
+        "cacheKey" => cache_key,
+        "job" => cache_key,
+    )
+
+    if !isnothing(cb.cancel)
+        result["cancel"] = cb.cancel
+    end
+    if !isnothing(cb.progress_default)
+        result["progressDefault"] = cb.progress_default
+    end
+
+    response = HTTP.Response(200, ["Content-Type" => "application/json"])
+    response.body = Vector{UInt8}(JSON3.write(result))
+    return response
+end
+
+# ─── Background Callback: Poll Request ─────────────────────────────────────
+
+function _poll_background_callback(app, cb, query, output, params)
+    cache_key = query["cacheKey"]
+    mgr = something(cb.manager, app.config.background_callback_manager)
+
+    response_data = Dict{String,Any}()
+
+    # Check for progress
+    progress_data = get_progress(mgr, cache_key)
+    if !isnothing(progress_data) && !isnothing(cb.progress)
+        progress_response = Dict{String,Any}()
+        for (i, prog_out) in enumerate(cb.progress)
+            id_str = dep_id_string(prog_out.id)
+            if !haskey(progress_response, id_str)
+                progress_response[id_str] = Dict{String,Any}()
+            end
+            val = i <= length(progress_data) ? progress_data[i] : nothing
+            progress_response[id_str][prog_out.property] = val
+        end
+        response_data["progress"] = progress_response
+    end
+
+    # Check for result
+    result = get_result(mgr, cache_key)
+    if !(result isa _Undefined)
+        # Handle error results
+        if result isa Dict && get(result, "error", false) == true
+            response_data["error"] = result["message"]
+        elseif is_no_update(result) || result isa NoUpdate
+            # Return 204 equivalent
+            return HTTP.Response(204)
+        else
+            is_multi = is_multi_out(cb)
+            outputs_list = outputs_to_vector(
+                get(params, :outputs, split_callback_id(string(output))),
+                is_multi
+            )
+            res_vector = is_multi ? result : _single_element_vect(result)
+
+            response_dict = Dict{String,Any}()
+            _push_to_res!(response_dict, res_vector, outputs_list)
+
+            if !isempty(response_dict)
+                response_data["response"] = response_dict
+                response_data["multi"] = true
+            end
+
+            # Check for updated props from the background job
+            updated_props = get_updated_props(mgr, cache_key)
+            if !isempty(updated_props)
+                response_data["sideUpdate"] = updated_props
+            end
+        end
+    end
+
+    response = HTTP.Response(200, ["Content-Type" => "application/json"])
+    response.body = Vector{UInt8}(JSON3.write(response_data))
     return response
 end
 

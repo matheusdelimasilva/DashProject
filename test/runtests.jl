@@ -10,4 +10,6 @@ using HTTP
     include("test_patch.jl")
     include("test_dispatch.jl")
     include("test_server.jl")
+    include("test_pages.jl")
+    include("test_background.jl")
 end

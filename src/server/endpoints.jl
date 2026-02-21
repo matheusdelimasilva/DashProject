@@ -26,12 +26,52 @@ end
 # ─── Index Page ──────────────────────────────────────────────────────────────
 
 function process_index(request::HTTP.Request, state; kwargs...)
+    app = state.app
+
+    # Phase 3: If use_pages with meta tags, regenerate index with page-specific meta
+    if app.config.use_pages && app.config.include_pages_meta
+        request_path = HTTP.URIs.splitpath(request.target) |> p -> "/" * join(p, "/")
+        page_metas = _page_meta_tags(app, request_path)
+        resources = state.cache.resources
+
+        # Combine base meta tags with page-specific ones
+        original_metas = app.config.meta_tags
+        all_meta_tags = vcat(page_metas, original_metas)
+        meta_html_str = _metas_html_with_extra(app, all_meta_tags)
+
+        idx_string = interpolate_string(app.index_string;
+            metas=meta_html_str,
+            title=app.title,
+            favicon=favicon_html(app, resources),
+            css=css_html(app, resources),
+            app_entry=app_entry_html(),
+            config=config_html(app),
+            scripts=scripts_html(app, resources),
+            renderer=renderer_html()
+        )
+        return HTTP.Response(200, ["Content-Type" => "text/html"], body=idx_string)
+    end
+
     get_cache(state).need_recache && rebuild_cache!(state)
     return HTTP.Response(
         200,
         ["Content-Type" => "text/html"],
         body=state.cache.index_string
     )
+end
+
+# Helper to build metas HTML with extra page-specific tags
+function _metas_html_with_extra(app::DashApp, all_meta_tags::Vector{Dict{String,String}})
+    has_ie_compat = any(all_meta_tags) do tag
+        get(tag, "http-equiv", "") == "X-UA-Compatible"
+    end
+    has_charset = any(tag -> haskey(tag, "charset"), all_meta_tags)
+
+    result = String[]
+    !has_ie_compat && push!(result, "<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">")
+    !has_charset && push!(result, "<meta charset=\"UTF-8\">")
+    append!(result, format_tag.("meta", all_meta_tags, opened=true))
+    return join(result, "\n        ")
 end
 
 # ─── Assets ──────────────────────────────────────────────────────────────────

@@ -58,6 +58,10 @@ struct DashConfig
     pages_folder::String
     use_pages::Bool
     health_endpoint::String
+    # Phase 3 additions
+    include_pages_meta::Bool
+    routing_callback_inputs::Dict{String,Any}
+    background_callback_manager::Union{AbstractBackgroundManager,Nothing}
 end
 
 # ─── DashApp ─────────────────────────────────────────────────────────────────
@@ -100,12 +104,15 @@ mutable struct DashApp
     # Dash 2.x additions
     hooks::Union{Nothing,Dict{String,Any}}
     on_error::Union{Nothing,Function}
+    # Phase 3 additions
+    _pages_setup_done::Bool
 
     function DashApp(root_path, is_interactive, config, index_string, title="Dash")
         new(root_path, is_interactive, config, index_string, title,
             nothing, DevTools(dash_env(Bool, "debug", false)),
             Dict{String,Any}[], Dict{String,Callback}(), String[],
-            nothing, nothing)
+            nothing, nothing,
+            false)
     end
 end
 
@@ -200,6 +207,8 @@ Create a new Dash application.
 - `pages_folder` — multi-page folder (default: "pages")
 - `use_pages` — enable multi-page routing (default: false)
 - `health_endpoint` — health check URL path (default: "_dash-health")
+- `include_pages_meta` — include OG/Twitter meta tags for pages (default: true)
+- `background_callback_manager` — default background callback manager
 
 # Example
 ```julia
@@ -233,7 +242,11 @@ function dash(;
     # Dash 2.x additions
     pages_folder="pages",
     use_pages=false,
-    health_endpoint="_dash-health"
+    health_endpoint="_dash-health",
+    # Phase 3 additions
+    include_pages_meta=true,
+    routing_callback_inputs=Dict{String,Any}(),
+    background_callback_manager=nothing
 )
     check_index_string(index_string)
     config = DashConfig(
@@ -255,7 +268,10 @@ function dash(;
         update_title,
         pages_folder,
         use_pages,
-        health_endpoint
+        health_endpoint,
+        include_pages_meta,
+        routing_callback_inputs,
+        background_callback_manager
     )
     return DashApp(app_root_path(), isinteractive(), config, index_string)
 end

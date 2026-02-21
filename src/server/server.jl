@@ -93,6 +93,14 @@ validate_layout(layout) = error("The layout must be a component, tree of compone
 # ─── Make Handler ────────────────────────────────────────────────────────────
 
 function make_handler(app::DashApp, registry::ResourcesRegistry; check_layout=false)
+    # Phase 3: Set up pages system before building routes
+    if app.config.use_pages && !app._pages_setup_done
+        _setup_pages!(app)
+    end
+
+    # Phase 3: Set up background cancel callbacks
+    _setup_background_cancels!(app)
+
     state = HandlerState(app, registry)
     prefix = app.config.routes_pathname_prefix
     assets_url_path = app.config.assets_url_path
