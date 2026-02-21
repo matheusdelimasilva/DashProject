@@ -1,0 +1,30 @@
+name = "Dash2"
+uuid = "24256a8a-72d9-499b-ae6a-e6e078715326"
+authors = ["matheusdelimasilva <mdelim01@tufts.edu>"]
+version = "0.1.0"
+
+[deps]
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+MD5 = "6ac74813-4b46-53a4-afec-0b5dc9d7885c"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[compat]
+CodecZlib = "0.6, 0.7"
+DataStructures = "0.17, 0.18, 0.19"
+HTTP = "1"
+JSON3 = "1.9"
+MD5 = "0.2"
+YAML = "0.4"
+julia = "1.6"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
