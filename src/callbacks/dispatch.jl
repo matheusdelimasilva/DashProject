@@ -27,7 +27,8 @@ end
 function _push_to_res!(res, value, out)
     if !(value isa NoUpdate)
         id = _dep_id_str(out)
-        prop = String(out.property)
+        # Strip @hash suffix added by allow_duplicate (e.g. "children@abc123" → "children")
+        prop = first(split(String(out.property), "@"))
         dashval = to_dash(value)
         if haskey(res, id)
             res[id][prop] = dashval

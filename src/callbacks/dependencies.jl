@@ -148,6 +148,38 @@ function output_string(deps::CallbackDeps)
     return dependency_string(deps.output[1])
 end
 
+"""
+    output_string_with_duplicate(deps::CallbackDeps)
+
+Build the callback output string, appending `@<hash>` to outputs with
+`allow_duplicate=true`. The hash is a SHA-256 of the input dependency strings,
+matching Python Dash's `create_callback_id` behavior. This ensures each
+duplicate callback gets a unique key for the frontend renderer.
+"""
+function output_string_with_duplicate(deps::CallbackDeps)
+    any_dup = any(o -> o.allow_duplicate, deps.output)
+    if !any_dup
+        return output_string(deps)
+    end
+
+    # Hash of inputs — same approach as Python Dash
+    input_str = join([dependency_string(d) for d in deps.input], ".")
+    hashed = bytes2hex(MD5.md5(input_str))
+
+    function _concat(out)
+        base = dependency_string(out)
+        if out.allow_duplicate
+            return base * "@" * hashed
+        end
+        return base
+    end
+
+    if deps.multi_out
+        return ".." * join(_concat.(deps.output), "...") * ".."
+    end
+    return _concat(deps.output[1])
+end
+
 Base.convert(::Type{Vector{<:Output}}, v::Output{<:IdTypes}) = [v]
 Base.convert(::Type{Vector{<:Input}}, v::Input{<:IdTypes}) = [v]
 Base.convert(::Type{Vector{<:State}}, v::State{<:IdTypes}) = [v]

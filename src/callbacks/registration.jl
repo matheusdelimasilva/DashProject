@@ -116,14 +116,15 @@ function _callback!(func::Union{Function,ClientsideFunction,String}, app::DashAp
                     manager=nothing)
     check_callback(func, app, deps; background=background, progress=progress)
 
-    out_id = Symbol(output_string(deps))
+    any_allow_dup = any(o -> o.allow_duplicate, deps.output)
 
-    # Check for duplicate outputs (unless allow_duplicate is set)
-    if haskey(app.callback_map, string(out_id))
-        any_allow_dup = any(o -> o.allow_duplicate, deps.output)
-        if !any_allow_dup
-            error("Multiple callbacks cannot target the same output. Offending output: $(out_id)")
-        end
+    # allow_duplicate callbacks always get a unique @hash key — no conflict possible.
+    # Non-duplicate callbacks use the plain key and must not collide.
+    out_id_str = output_string_with_duplicate(deps)
+    base_out_id = output_string(deps)
+
+    if !any_allow_dup && haskey(app.callback_map, base_out_id)
+        error("Multiple callbacks cannot target the same output. Offending output: $(base_out_id)")
     end
 
     callback_func = make_callback_func!(app, func, deps)
@@ -134,7 +135,7 @@ function _callback!(func::Union{Function,ClientsideFunction,String}, app::DashAp
     running_off_dict = nothing
 
     if background
-        bg_key = make_background_key(string(out_id), callback_func)
+        bg_key = make_background_key(out_id_str, callback_func)
 
         # Process running pairs: Vector of (Output, running_value, off_value)
         if !isnothing(running)
@@ -175,11 +176,11 @@ function _callback!(func::Union{Function,ClientsideFunction,String}, app::DashAp
                   cancel=_process_cancel(cancel),
                   manager=manager)
 
-    # Store in callback_map for dispatch
-    app.callback_map[string(out_id)] = cb
+    # Store in callback_map for dispatch (use deduplicated key)
+    app.callback_map[out_id_str] = cb
 
-    # Store in callback_list for _dash-dependencies serialization
-    cb_entry = _make_callback_list_entry(deps, cb)
+    # Store in callback_list for _dash-dependencies serialization (use deduplicated output)
+    cb_entry = _make_callback_list_entry(deps, cb, out_id_str)
     push!(app.callback_list, cb_entry)
 
     return nothing
@@ -199,10 +200,10 @@ function _process_cancel(cancel)
     return result
 end
 
-function _make_callback_list_entry(deps::CallbackDeps, cb::Callback)
+function _make_callback_list_entry(deps::CallbackDeps, cb::Callback, out_id_str::String)
     func = cb.func
     entry = Dict{String,Any}(
-        "output" => output_string(deps),
+        "output" => out_id_str,
         "inputs" => [Dict("id" => dep_id_string(d), "property" => d.property) for d in deps.input],
         "state" => [Dict("id" => dep_id_string(d), "property" => d.property) for d in deps.state],
         "prevent_initial_call" => cb.prevent_initial_call
