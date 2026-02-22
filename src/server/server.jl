@@ -90,6 +90,47 @@ validate_layout(layout::Component) = nothing
 validate_layout(layout::Function) = validate_layout(layout())
 validate_layout(layout) = error("The layout must be a component, tree of components, or a function which returns a component.")
 
+# ─── Hot Reload Poll ─────────────────────────────────────────────────────────
+
+"""
+    start_reload_poll(state::HandlerState)
+
+Spawn a background `@async` task that watches the assets folder and component
+package paths for CSS/JS changes and signals the browser to reload.
+Julia source file changes are handled separately by `hot_restart`.
+"""
+function start_reload_poll(state::HandlerState)
+    folders = Set{String}()
+    push!(folders, get_assets_path(state.app))
+    if !isnothing(state.registry.dash_renderer)
+        push!(folders, state.registry.dash_renderer.path)
+    end
+    for pkg in values(state.registry.components)
+        push!(folders, pkg.path)
+    end
+
+    interval = get_devsetting(state.app, :hot_reload_watch_interval)
+    initial_watched = init_watched(folders)
+    assets_path = get_assets_path(state.app)
+
+    state.reload.task = @async poll_folders(folders, initial_watched; interval=interval) do file, ts, deleted
+        state.reload.hard = true
+        state.reload.hash = generate_hash()
+
+        if startswith(file, assets_path)
+            state.cache.need_recache = true
+            rel_path = lstrip(replace(relpath(file, assets_path), '\\' => '/'), '/')
+            push!(state.reload.changed_assets,
+                ChangedAsset(
+                    asset_path(state.app, rel_path),
+                    trunc(Int, ts),
+                    endswith(file, ".css")
+                )
+            )
+        end
+    end
+end
+
 # ─── Make Handler ────────────────────────────────────────────────────────────
 
 function make_handler(app::DashApp, registry::ResourcesRegistry; check_layout=false)
@@ -138,6 +179,9 @@ function make_handler(app::DashApp, registry::ResourcesRegistry; check_layout=fa
     compile_request = HTTP.Request("GET", prefix)
     HTTP.setheader(compile_request, "Accept-Encoding" => "gzip")
     handle(handler, compile_request)
+
+    # Hot reload polling (must start after precompilation)
+    get_devsetting(app, :hot_reload) && start_reload_poll(state)
 
     return handler
 end
@@ -188,23 +232,35 @@ function run_server(app::DashApp,
         dev_tools_prune_errors
     )
 
-    handler = make_handler(app)
+    # Build a closure that starts the HTTP server and returns (server, task)
+    start_server = () -> begin
+        handler = make_handler(app)
+        server = Sockets.listen(get_inetaddr(host, port))
+        println("Dash2 is running on http://$(host):$(port)$(app.config.routes_pathname_prefix)")
+        println("  * Debug mode: $(debug)")
+        task = @async HTTP.serve(handler, host, port; server=server)
+        return (server, task)
+    end
 
-    println("Dash2 is running on http://$(host):$(port)$(app.config.routes_pathname_prefix)")
-    println("  * Debug mode: $(debug)")
+    if get_devsetting(app, :hot_reload) && !is_hot_restart_available()
+        @warn "Hot reload is unavailable in interactive sessions. Run your app with `julia script.jl` to enable it."
+    end
 
-    server = Sockets.listen(get_inetaddr(host, port))
-    task = @async HTTP.serve(handler, host, port; server=server)
-
-    try
-        wait(task)
-    catch e
-        close(server)
-        if e isa InterruptException
-            println("\nDash2 server stopped.")
-            return
-        else
-            rethrow(e)
+    if get_devsetting(app, :hot_reload) && is_hot_restart_available()
+        hot_restart(start_server;
+            check_interval=get_devsetting(app, :hot_reload_watch_interval))
+    else
+        (server, task) = start_server()
+        try
+            wait(task)
+        catch e
+            close(server)
+            if e isa InterruptException
+                println("\nDash2 server stopped.")
+                return
+            else
+                rethrow(e)
+            end
         end
     end
 end
