@@ -1,8 +1,28 @@
 # Dash2.jl — Implementation Progress
 
-## Current Status: Phase 1 & 2 Complete
+## Current Status: Phase 1, 2, & 3 Complete + Hot Reload
 
-**Test suite: 139 tests pass, 0 failures**
+**Test suite: 269 tests pass, 0 failures**
+
+---
+
+## Latest Updates (Phase 3.5: Hot Reload)
+
+**Server Restart on Julia File Changes** ✓
+- Implemented `hot_restart(func; check_interval)` mechanism identical to Dash.jl
+- Parent/child execution pattern using `Base.eval(Main, :(module X; include(file) end))`
+- When any `.jl` file is saved → server closes → script re-evaluated → new server starts
+- Browser detects new hash from fresh server instance → triggers reload
+- Works from command line (`julia main.jl debug=true`) — unavailable in REPL
+
+**Asset Hot Reload** ✓
+- `start_reload_poll(state)` watches CSS/JS changes and component packages
+- Updates reload hash for browser reload (with CSS hot-swap optimization)
+- Separate async task — doesn't block server
+
+**Source File Discovery** ✓
+- `parse_includes(file)` walks AST to find all `.jl` files reachable via `include()` calls
+- Ensures all application source files are monitored, not just the main script
 
 ---
 
@@ -135,34 +155,75 @@
 
 ---
 
-## Phase 3: Pages + Background Callbacks [STUBS ONLY]
+## Phase 3: Pages + Background Callbacks [COMPLETE]
 
-### Task 3.1: Page Registry [STUB]
+### Task 3.1: Page Registry System [DONE]
 - **File**: `src/pages/pages.jl`
-- `PAGE_REGISTRY` OrderedDict created
-- `register_page()` function with basic field storage
-- Not yet integrated into routing or auto-discovery
+- `PAGE_REGISTRY` OrderedDict with full field tracking
+- `register_page()` with path inference (`pages.foo` → `/foo`), image inference, name inference
+- Path template matching (`<var>` placeholders) with variable extraction
+- Query string parsing and page title/description callbacks
+- Auto-discovery from `pages/` folder via `_import_layouts_from_pages()`
+- Routing callback with multi-output support
+- Page meta tags (description, og:title, og:image, twitter:card, etc.)
 
-### Task 3.2: Background Callbacks [STUB]
+### Task 3.2: Background Callbacks [DONE]
 - **File**: `src/callbacks/background.jl`
-- `AbstractBackgroundManager` abstract type defined
-- `ThreadPoolManager` struct defined
-- Not yet integrated into callback dispatch
+- `AbstractBackgroundManager` abstract type and interface
+- `ThreadPoolManager` full implementation with result/progress/job tracking
+- Task spawning via `Threads.@spawn` with cache keys
+- Progress reporting to dedicated Output targets
+- Job cancellation via interrupt scheduling
+- Error handling and `PreventUpdate` support
 
-### Remaining Phase 3 Work
-- [ ] Page auto-discovery from `pages/` folder
-- [ ] Routing callback for page navigation
-- [ ] Path template matching (`/asset/<asset_id>`)
-- [ ] Page meta tags (title, description, og:image)
-- [ ] Background callback execution with `Threads.@spawn`
-- [ ] Progress reporting via dedicated output
-- [ ] Cancellation support
+### Task 3.3: Callback allow_duplicate [DONE]
+- **File**: `src/callbacks/dependencies.jl`, `registration.jl`, `dispatch.jl`
+- `allow_duplicate` flag on `Output` enables multiple callbacks to target same output
+- Unique hashing via MD5 of input strings (`output_id@hash` format)
+- Response JSON uses clean property names (hash stripped when applying to DOM)
+- Full test coverage with 4 test cases
+
+### Task 3.4: Server Integration [DONE]
+- Pages system setup in `make_handler()` via `_setup_pages!(app)`
+- Background cancel callbacks registered via `_setup_background_cancels!(app)`
+- Page meta tags injected into `process_index` when enabled
+- Correct include order in `src/Dash2.jl` (background before dependencies before pages)
+
+---
+
+## Phase 3.5: Hot Reload [COMPLETE]
+
+### Task 3.5.1: File Watching [DONE]
+- **File**: `src/utils.jl`
+- `WatchState` struct for tracking file `mtime`
+- `poll_until_changed(files; interval)` — blocks until any watched file changes
+- `init_watched(folders)` — snapshot all file mtimes
+- `poll_folders(on_change, folders, initial_watched; interval)` — async polling with callback
+- Used by both server restart and asset reload mechanisms
+
+### Task 3.5.2: Source File Discovery [DONE]
+- `parse_includes(file)` — recursively discover all `.jl` files via AST analysis
+- `_parse_includes!`, `_parse_elem!` — walk AST following `include()` calls
+- Used to build complete list of Julia source files for hot reload monitoring
+
+### Task 3.5.3: Server Restart on `.jl` Changes [DONE]
+- **File**: `src/utils.jl`, `src/server/server.jl`
+- `is_hot_restart_available()` — checks `!isinteractive() && !isempty(Base.PROGRAM_FILE)`
+- `hot_restart(func; check_interval)` — parent/child execution pattern
+  - **Parent path**: loops forever, re-evaluating script via `Base.eval(Main, :(module X; include(file) end))`
+  - **Child path**: starts server, watches files, blocks until change, closes server
+- When `.jl` file is saved → server closes → script re-evaluated → new server starts with updated code
+- Browser detects new hash from fresh server → reloads and shows updated layout/callbacks
+
+### Task 3.5.4: Asset Hot Reload [DONE]
+- `start_reload_poll(state)` watches assets folder (CSS/JS) and component packages
+- On asset change: updates reload hash (hard reload) or performs CSS hot-swap (soft reload)
+- Separate from server restart mechanism — browser reload without server downtime
 
 ---
 
 ## Phase 4: Polish + Production Readiness [NOT STARTED]
 
-- [ ] Hot reload with file watching + `Revise.jl` integration
 - [ ] Comprehensive error handling (JSON errors for callbacks, HTML debug pages with stack traces)
 - [ ] Testing utilities module (`make_test_app()`, `fire_callback()`)
 - [ ] Documentation + examples
@@ -176,23 +237,28 @@
 
 ```
 Test Summary: | Pass  Total  Time
-Dash2.jl      |  139    139  5.7s
+Dash2.jl      |  269    269  10.4s
   Components                    21
   DashApp                       26
-  Callbacks                     27
+  Callbacks                     42
   Patch                         16
   Dispatch                      22
   Server                        10
+  Pages                         14
+  Background                    11
+  Allow-Duplicate              18
 ```
 
 ### Test Files
 - `test/runtests.jl` — entry point
 - `test/test_components.jl` — component creation, properties, wildcards, JSON, tree lookup
 - `test/test_app.jl` — dash() factory, config, layout, devtools, pathname_configs
-- `test/test_callbacks.jl` — dependency types, registration, multi-output, allow_duplicate, clientside, context, validation
+- `test/test_callbacks.jl` — dependency types, registration, multi-output, allow_duplicate (robust renderer tests), clientside, context, validation
 - `test/test_patch.jl` — all operations, nested access, JSON serialization, is_patch
 - `test/test_dispatch.jl` — NoUpdate, PreventUpdate, split_callback_id, grouping utilities, callback execution, set_props
 - `test/test_server.jl` — router, fingerprint, compression, exception handling, make_handler + endpoints
+- `test/test_pages.jl` — register_page, path inference, image inference, sorting, template matching, query parsing, page container, meta tags
+- `test/test_background.jl` — ThreadPoolManager, job lifecycle, progress updates, cancellation, PreventUpdate, errors, cache keys, Callback struct, background registration
 
 ---
 
@@ -232,7 +298,7 @@ Dash2.jl/
       resources.jl                # ApplicationResources, asset walking
       index.jl                    # Index page generation
     pages/
-      pages.jl                    # PAGE_REGISTRY, register_page (stub)
+      pages.jl                    # PAGE_REGISTRY, register_page, routing callback, meta tags
   test/
     runtests.jl
     test_app.jl
@@ -241,4 +307,6 @@ Dash2.jl/
     test_dispatch.jl
     test_patch.jl
     test_server.jl
+    test_pages.jl                 # Pages system tests
+    test_background.jl            # Background callbacks tests
 ```
